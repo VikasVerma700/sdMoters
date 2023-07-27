@@ -1,0 +1,1 @@
+trigger CustAppTrigger on Customer_App_Callback__e (after insert) { CustAppCallbackQueue.enqueue(trigger.new); }

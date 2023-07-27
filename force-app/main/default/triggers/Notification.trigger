@@ -1,0 +1,1 @@
+trigger Notification on Notification__c (after insert, after update) { TriggerRun.run(new NotificationHandler()); }
