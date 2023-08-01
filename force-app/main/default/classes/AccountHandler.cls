@@ -101,7 +101,13 @@ public without sharing class AccountHandler extends TriggerBase {
             ExternalSystemAccount__c extAcc : account.ExternalSystemAccounts__r
           ) {
             if (!ESATriggerHandler.dmsEsaAccountIds.contains(extAcc.Id)) {
-              esaAccListToUpdate.add(prepareEsaAccount(extAcc, account));
+              ExternalSystemAccount__c extAccount = ExtSysAccountLookup.prepareAccountToEsa(
+                extAcc,
+                account,
+                '',
+                ''
+              );
+              esaAccListToUpdate.add(extAccount);
             }
           }
         }
@@ -128,80 +134,6 @@ public without sharing class AccountHandler extends TriggerBase {
       }
     }
     ApplicationLogUtility.insertLogs();
-  }
-
-  public static ExternalSystemAccount__c prepareEsaAccount(
-    ExternalSystemAccount__c extAcc,
-    Account account
-  ) {
-    String recordTypeDevName = Schema.SObjectType.Account.getRecordTypeInfosById()
-      .get(account.RecordTypeId)
-      .getDeveloperName();
-    ExternalSystemAccount__c extSysAccount = extAcc;
-    if (recordTypeDevName == 'PersonAccount') {
-      extSysAccount.Salutation__c = account.Salutation;
-      extSysAccount.FirstName__c = account.FirstName;
-      extSysAccount.LastName__c = account.LastName;
-      extSysAccount.PreferredName__c = account.Prefer_Name__pc;
-      extSysAccount.CompanyName__c = account.CompanyName__pc;
-      extSysAccount.DrivingLicenseExpiry__c = String.valueOf(
-        account.LicenseExpiryDate__pc
-      );
-      extSysAccount.isPerson__c = true;
-      extSysAccount.CustomerType__c = 'I';
-      extSysAccount.PhoneMobile__c = account.PersonMobilePhone;
-      extSysAccount.PhoneHome__c = account.PersonHomePhone;
-      extSysAccount.EmailHome__c = account.Home_Email__c;
-      extSysAccount.Postcode__c = account.PersonMailingPostalCode;
-      extSysAccount.City__c = account.PersonMailingCity;
-      extSysAccount.State__c = account.PersonMailingState;
-      extSysAccount.Country__c = account.PersonMailingCountry;
-      if (account.PersonMailingStreet != null) {
-        List<String> res = account.PersonMailingStreet.split(',', 2);
-        if (res.size() == 2) {
-          extSysAccount.Address1__c = res[0] != null
-            ? res[0]
-            : account.PersonMailingStreet;
-          extSysAccount.Address2__c = res[1] != null
-            ? res[1]
-            : res[0] != null ? res[0] : account.PersonMailingStreet;
-        }
-        if (res.size() == 1) {
-          extSysAccount.Address1__c = account.PersonMailingStreet;
-        }
-      }
-    } else {
-      extSysAccount.FullName__c = account.Name;
-      extSysAccount.isPerson__c = false;
-      extSysAccount.CustomerType__c = 'C';
-      extSysAccount.PhoneOffice__c = account.Phone;
-      extSysAccount.City__c = account.BillingCity;
-      extSysAccount.State__c = account.BillingState;
-      extSysAccount.Postcode__c = account.BillingPostalCode;
-      extSysAccount.Country__c = account.BillingCountry;
-      extSysAccount.PhoneMobile__c = account.Phone;
-      if (account.BillingStreet != null) {
-        List<String> res = account.BillingStreet.split(',', 2);
-        if (res.size() == 2) {
-          extSysAccount.Address1__c = res[0] != null
-            ? res[0]
-            : account.BillingStreet;
-          extSysAccount.Address2__c = res[1] != null
-            ? res[1]
-            : res[0] != null ? res[0] : account.BillingStreet;
-        }
-        if (res.size() == 1) {
-          extSysAccount.Address1__c = account.BillingStreet;
-        }
-      }
-    }
-    extSysAccount.Birthdate__c = String.valueOf(account.PersonBirthdate);
-    extSysAccount.DocumentNumber__c = account.NRIC_Number__c != null
-      ? account.NRIC_Number__c
-      : account.DocumentNumberAlphaN__c;
-    extSysAccount.EmailOffice__c = account.Office_Email__c;
-    extSysAccount.EmailOther__c = account.Other_Email__c;
-    return extSysAccount;
   }
 
   public override void afterDelete(Map<Id, SObject> triggerOld) {

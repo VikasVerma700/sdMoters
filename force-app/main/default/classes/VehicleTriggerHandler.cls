@@ -13,10 +13,12 @@ public without sharing class VehicleTriggerHandler extends TriggerBase {
 
   public static boolean isPersonVehicle(Vehicle__c vehicle) {
     return Util.isPersonEntity(
+      vehicle.id,
       vehicle.DmsCustomerType__c,
       vehicle.DmsDocumentNumber__c,
       vehicle.DmsCustomerName__c
     );
+    // return true;
   }
 
   public override void afterInsert(Map<Id, SObject> triggerNew) {
@@ -85,10 +87,12 @@ public without sharing class VehicleTriggerHandler extends TriggerBase {
       }
     }
     if (updateOwnershipVehicleList.size() > 0) {
+      system.debug('deactivateOwnership ');
       deactivateOwnership(updateOwnershipVehicleList); //update vo
       createOwnership(updateOwnershipVehicleList);
     }
     if (deactivateOwnershipVehicleList.size() > 0) {
+      system.debug('deactivateOwnership ');
       deactivateOwnership(deactivateOwnershipVehicleList);
     }
     AltDriverRepository.reviseAltDrivers(altDriverRevisionVehicleIdSet);
@@ -231,7 +235,8 @@ public without sharing class VehicleTriggerHandler extends TriggerBase {
         PreferredName__c,
         Account__c,
         FullName__c,
-        CustomerType__c
+        CustomerType__c,
+        DocumentNumberAlphaN__c
       FROM ExternalSystemAccount__c
       WHERE
         CompanyCode__c = :companyCode

@@ -7,6 +7,19 @@ public with sharing class DmsVehicle {
       }
       CustomerVehicleService.Vehicle payload = prepareVehicle(vehicle);
       payload.CompanyCode = callback.CompanyCode__c;
+
+      if (callback.CompanyCode__c == CompanyRepository.C199) {
+        ExternalSystemAccount__c esaAccount = getEsaAccount(callback);
+        system.debug('esaAccount : ' + esaAccount);
+        if (esaAccount != null) {
+          payload.customerNo = esaAccount.CustomerNumber__c != null
+            ? Integer.valueOf(esaAccount.CustomerNumber__c)
+            : 0;
+        } else {
+          payload.customerNo = 0;
+        }
+      }
+
       CustomerVehicleService service = new CustomerVehicleService(
         callback.CompanyCode__c
       );
@@ -91,6 +104,54 @@ public with sharing class DmsVehicle {
     return Database.query(String.escapeSingleQuotes(query));
   }
 
+  public static ExternalSystemAccount__c getEsaAccount(
+    DmsCallBack__e callback
+  ) {
+    Set<Id> accountId = new Set<Id>();
+    if (callback != null) {
+      Vehicle__c vehicle = [
+        SELECT
+          Id,
+          Name,
+          (
+            SELECT Id, Name, Customer__c
+            FROM Vehicle_Ownerships1__r
+            WHERE Status__c = 'Active'
+            ORDER BY CreatedDate DESC
+            LIMIT 1
+          )
+        FROM Vehicle__c
+        WHERE Id = :callback.Id__c
+      ];
+      if (vehicle.Vehicle_Ownerships1__r.size() > 0) {
+        if (String.isNotBlank(vehicle.Vehicle_Ownerships1__r[0].Customer__c)) {
+          accountId.add(vehicle.Vehicle_Ownerships1__r[0].Customer__c);
+        }
+      }
+    }
+
+    String compCode = callback.CompanyCode__c;
+    if (!accountId.isEmpty()) {
+      String query = 'SELECT Id';
+      query +=
+        ', ( SELECT ' +
+        String.join(
+          new List<String>(
+            schema.SObjectType.ExternalSystemAccount__c.fields.getMap().keySet()
+          ),
+          ','
+        );
+      query += ' FROM ExternalSystemAccounts__r WHERE CompanyCode__c =:compCode ORDER BY CreatedDate DESC LIMIT 1)';
+      query += ' FROM Account ';
+      query += 'WHERE Id IN :accountId';
+      Account account = Database.query(String.escapeSingleQuotes(query));
+      if (account.ExternalSystemAccounts__r.size() > 0) {
+        return account.ExternalSystemAccounts__r[0];
+      }
+    }
+    return new ExternalSystemAccount__c();
+  }
+
   public static CustomerVehicleService.Vehicle prepareVehicle(
     Vehicle__c vehicle
   ) {
@@ -121,7 +182,18 @@ public with sharing class DmsVehicle {
     newVehicle.transmission = vehicle.Vehicle_Model__r.Transmission__c;
     newVehicle.sellingDealerCode = vehicle.SellingDealerCode__c;
     newVehicle.sellingDealerName = vehicle.SellingDealer__c;
-    newVehicle.productionDate = Integer.valueOf(vehicle.Production_Date__c);
+    // newVehicle.productionDate = Integer.valueOf(vehicle.Production_Date__c);
+    /*
+		if (vehicle.Production_Date__c != null) {
+	        newVehicle.productionDate = Integer.valueOf(String.valueOf(vehicle.Production_Date__c.year()) + String.valueOf(vehicle.Production_Date__c.month()));
+		}
+        */
+    newVehicle.productionMonth = String.isNotBlank(vehicle.Production_Month__c)
+      ? Integer.valueOf(vehicle.Production_Month__c)
+      : null;
+    newVehicle.productionYear = String.isNotBlank(vehicle.Production_Year__c)
+      ? Integer.valueOf(vehicle.Production_Year__c)
+      : null;
     newVehicle.warrantyValidity = vehicle.Warranty_Expiry_Date__c;
     newVehicle.extendedWarrantyValidity = vehicle.Extended_Warranty_Date__c;
     newVehicle.customerNo = vehicle.DmsCustomerNumber__c != null
@@ -287,7 +359,7 @@ public with sharing class DmsVehicle {
       ),
       ','
     );
-    extQuery += ' FROM ExternalSystemAccount__c WHERE Account__c IN :custIdSet AND CompanyCode__c =: payloadCmpCode Order by CreatedDate Desc LIMIT 1';
+    extQuery += ' FROM ExternalSystemAccount__c WHERE Account__c IN :custIdSet AND CompanyCode__c =: payloadCmpCode ORDER BY CreatedDate DESC LIMIT 1';
     List<ExternalSystemAccount__c> extAccountList = Database.query(
       String.escapeSingleQuotes(extQuery)
     );
@@ -327,7 +399,7 @@ public with sharing class DmsVehicle {
     if (!accountList.isEmpty()) {
       for (Account account : accountList) {
         if (account.ExternalSystemAccounts__r.size() > 0) {
-          existEsaAccountList.add(account.ExternalSystemAccounts__r);
+          existEsaAccountList.addAll(account.ExternalSystemAccounts__r);
         }
         if (!idWithAccountMap.containsKey(account.Id)) {
           idWithAccountMap.put(account.Id, account);
@@ -348,14 +420,13 @@ public with sharing class DmsVehicle {
           );
         } else {
           if (idWithAccountMap.containsKey(extAcc.Account__c)) {
-            esaAccListToUpdate.add(
-              prepareAccountToEsa(
-                extAcc,
-                idWithAccountMap.get(extAcc.Account__c),
-                source,
-                relatedCompanyCode
-              )
+            ExternalSystemAccount__c extAccount = ExtSysAccountLookup.prepareAccountToEsa(
+              extAcc,
+              idWithAccountMap.get(extAcc.Account__c),
+              source,
+              relatedCompanyCode
             );
+            esaAccListToUpdate.add(extAccount);
           }
         }
       }
@@ -372,41 +443,17 @@ public with sharing class DmsVehicle {
           );
         } else {
           if (idWithAccountMap.containsKey(account.Id)) {
-            esaAccListToInsert.add(
-              prepareAccountToEsa(
-                new ExternalSystemAccount__c(),
-                idWithAccountMap.get(account.Id),
-                source,
-                relatedCompanyCode
-              )
+            ExternalSystemAccount__c extAccount = ExtSysAccountLookup.prepareAccountToEsa(
+              new ExternalSystemAccount__c(),
+              idWithAccountMap.get(account.Id),
+              source,
+              relatedCompanyCode
             );
+            esaAccListToInsert.add(extAccount);
           }
         }
       }
     }
-
-    /* if(!accountList.isEmpty()) {
-for(Account account : accountList) {
-if(accountWithEsaAccount.containsKey(account.Id)){
-if(account.ExternalSystemAccounts__r.size() > 0) {
-for(ExternalSystemAccount__c extAcc : account.ExternalSystemAccounts__r){
-esaAccListToUpdate.add(cloningExistEsaWithPayloadCmpCodeToEsa(extAcc, accountWithEsaAccount.get(account.Id), source, relatedCompanyCode ));
-}      
-}else{
-esaAccListToInsert.add(cloningExistEsaWithPayloadCmpCodeToEsa(new ExternalSystemAccount__c(), accountWithEsaAccount.get(account.Id) , source, relatedCompanyCode ));
-}
-
-}else{
-if(account.ExternalSystemAccounts__r.size() > 0) {
-for(ExternalSystemAccount__c extAcc : account.ExternalSystemAccounts__r){
-esaAccListToUpdate.add(prepareAccountToEsa(extAcc, account, source, relatedCompanyCode ));
-}      
-}else{
-esaAccListToInsert.add(prepareAccountToEsa(new ExternalSystemAccount__c(), account , source, relatedCompanyCode ));
-}
-} 
-}
-} */
 
     if (!esaAccListToInsert.isEmpty()) {
       Database.SaveResult[] esaAccountInsertList = Database.insert(
@@ -485,116 +532,14 @@ esaAccListToInsert.add(prepareAccountToEsa(new ExternalSystemAccount__c(), accou
     esaAcc.SourceBy__c = source;
     esaAcc.Source__c = source;
     esaAcc.CompanyCode__c = cmp;
-
-    if (
-      cmp != null &&
-      existEsaAccount.CustomerNumber__c != null &&
-      existEsaAccount.CustomerNumber__c != '0'
-    ) {
-      String uniqueKey = cmp + '_';
-      uniqueKey += String.valueOf(existEsaAccount.CustomerNumber__c);
-      esaAcc.UniqueKey__c = uniqueKey;
-    }
+    /*
+        if(cmp != null && existEsaAccount.CustomerNumber__c != null && existEsaAccount.CustomerNumber__c != '0'){
+            String uniqueKey = cmp + '_';
+            uniqueKey += String.valueOf(existEsaAccount.CustomerNumber__c);
+            esaAcc.UniqueKey__c = uniqueKey; 
+        }  
+        */
     return esaAcc;
-  }
-
-  public static ExternalSystemAccount__c prepareAccountToEsa(
-    ExternalSystemAccount__c extAcc,
-    Account account,
-    String source,
-    String cmp
-  ) {
-    String recordTypeDevName = Schema.SObjectType.Account.getRecordTypeInfosById()
-      .get(account.RecordTypeId)
-      .getDeveloperName();
-    ExternalSystemAccount__c extSysAccount = extAcc;
-    if (recordTypeDevName == 'PersonAccount') {
-      extSysAccount.Salutation__c = account.Salutation;
-      extSysAccount.FirstName__c = account.FirstName;
-      extSysAccount.LastName__c = account.LastName;
-      extSysAccount.PreferredName__c = account.Prefer_Name__pc;
-      extSysAccount.CompanyName__c = account.CompanyName__pc;
-      if (extSysAccount == null) {
-        extSysAccount.DocumentType__c = 'Malaysian NRIC';
-      }
-      extSysAccount.DrivingLicenseExpiry__c = String.valueOf(
-        account.LicenseExpiryDate__pc
-      );
-      extSysAccount.isPerson__c = true;
-      extSysAccount.CustomerType__c = 'I';
-      extSysAccount.PhoneMobile__c = account.PersonMobilePhone;
-      extSysAccount.PhoneHome__c = account.PersonHomePhone;
-      extSysAccount.EmailHome__c = account.Home_Email__c;
-      extSysAccount.Postcode__c = account.PersonMailingPostalCode;
-      extSysAccount.City__c = account.PersonMailingCity;
-      extSysAccount.State__c = account.PersonMailingState;
-      extSysAccount.Country__c = account.PersonMailingCountry;
-      if (account.PersonMailingStreet != null) {
-        List<String> res = account.PersonMailingStreet.split(',', 2);
-        if (res.size() == 2) {
-          extSysAccount.Address1__c = res[0] != null
-            ? res[0]
-            : account.PersonMailingStreet;
-          extSysAccount.Address2__c = res[1] != null
-            ? res[1]
-            : res[0] != null ? res[0] : account.PersonMailingStreet;
-        }
-        if (res.size() == 1) {
-          extSysAccount.Address1__c = account.PersonMailingStreet;
-        }
-      }
-    } else {
-      extSysAccount.FullName__c = account.Name;
-      if (extSysAccount == null) {
-        extSysAccount.DocumentType__c = 'Company Reg No.';
-      }
-      extSysAccount.isPerson__c = false;
-      extSysAccount.CustomerType__c = 'C';
-      extSysAccount.PhoneOffice__c = account.Phone;
-      extSysAccount.City__c = account.BillingCity;
-      extSysAccount.State__c = account.BillingState;
-      extSysAccount.Postcode__c = account.BillingPostalCode;
-      extSysAccount.Country__c = account.BillingCountry;
-      if (account.BillingStreet != null) {
-        List<String> res = account.BillingStreet.split(',', 2);
-        if (res.size() == 2) {
-          extSysAccount.Address1__c = res[0] != null
-            ? res[0]
-            : account.BillingStreet;
-          extSysAccount.Address2__c = res[1] != null
-            ? res[1]
-            : res[0] != null ? res[0] : account.BillingStreet;
-        }
-        if (res.size() == 1) {
-          extSysAccount.Address1__c = account.BillingStreet;
-        }
-      }
-    }
-    extSysAccount.Birthdate__c = String.valueOf(account.PersonBirthdate);
-    extSysAccount.DocumentNumber__c = account.NRIC_Number__c != null
-      ? account.NRIC_Number__c
-      : account.DocumentNumberAlphaN__c;
-    extSysAccount.EmailOffice__c = account.Office_Email__c;
-    extSysAccount.EmailOther__c = account.Other_Email__c;
-    extSysAccount.CustomerNumber__c = account.Customer_Number__c != null
-      ? String.valueOf(account.Customer_Number__c)
-      : '0';
-    extSysAccount.Account__c = extSysAccount.Account__c == null
-      ? account.Id
-      : extSysAccount.Account__c;
-    extSysAccount.SourceBy__c = source;
-    extSysAccount.Source__c = source;
-    extSysAccount.CompanyCode__c = cmp;
-    if (
-      cmp != null &&
-      account.Customer_Number__c != null &&
-      account.Customer_Number__c != 0
-    ) {
-      String uniqueKey = cmp + '_';
-      uniqueKey += String.valueOf(account.Customer_Number__c);
-      extSysAccount.UniqueKey__c = uniqueKey;
-    }
-    return extSysAccount;
   }
 
   public class CallbackVehicleResp {
